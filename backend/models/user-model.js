@@ -1,0 +1,32 @@
+import mongoose from 'mongoose';
+
+const UserSchema = new mongoose.Schema({
+    fullName: {
+        type: String,
+        required: true,
+    },
+    email: {
+        type: String,
+        required: true,
+        unique: true,
+        lowercase: true,
+        trim: true,
+        index: true,
+    },
+    password: {
+        type: String,
+        required: true,
+        select: false,
+        minlength: [8, "Password must be at least 8 characters long"],
+    },
+    profilePic: {
+        type: String,
+        default: "",
+    },
+    bio: {
+        type: String,
+        default: "Hey there! I am using Chatspace.",
+    },
+}, { strict: false, timestamps: true, trim: true });
+
+export const User = mongoose.model("User", UserSchema);

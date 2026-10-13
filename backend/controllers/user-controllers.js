@@ -1,0 +1,98 @@
+import fs from "node:fs";
+import { uploadOnCloudinary } from "../lib/cloudinary.js";
+import { generateToken } from "../lib/util.js";
+import { User } from "../models/user-model.js";
+import bcrypt from "bcryptjs";
+
+//signup new user
+export const signup = async (req, res) => {
+    const { fullName, email, password, profilePic, bio } = req.body || {};
+    try {
+        if (!fullName?.trim() || !email?.trim() || !password) {
+            return res.status(400).json({ message: "All fields are required" });
+        }
+        if (password.length < 8) return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
+        const normalizedEmail = email.trim().toLowerCase();
+        const user = await User.findOne({ email: normalizedEmail });
+        if (user) {
+            return res.status(400).json({ message: "User already exists" });
+        }
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        const newUser = await User.create({ fullName: fullName.trim(), email: normalizedEmail, password: hashedPassword, profilePic, bio });
+
+        const token = generateToken(newUser._id);
+        res.status(201).json({ success: true, message: "User created successfully", userData: newUser, token });
+    } catch (error) {
+        console.log("Signup error:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+//login user
+export const login = async (req, res) => {
+    const { email, password } = req.body || {};
+    try {
+        if (!email?.trim() || !password) {
+            return res.status(400).json({ message: "All fields are required" });
+        }
+        const user = await User.findOne({ email: email.trim().toLowerCase() }).select("+password");
+        if (!user) {
+            return res.status(400).json({ message: "Invalid credentials" });
+        }
+        const isPasswordCorrect = await bcrypt.compare(password, user.password);
+        if (!isPasswordCorrect) {
+            return res.status(400).json({ message: "Invalid credentials" });
+        }
+
+        // Remove password before sending response
+        const { password: _, ...userWithoutPassword } = user.toObject();
+        const token = generateToken(user._id);
+        res.status(200).json({ success: true, message: "User logged in successfully", userData: userWithoutPassword, token });
+    } catch (error) {
+        console.log("Login error:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+}
+
+//update user profile
+export const updateProfile = async (req, res) => {
+    try {
+        const { fullName, bio } = req.body;
+        const userId = req.user._id;
+        let updatedUser;
+
+        if (!req.file) {
+            // No file uploaded, update only text fields
+            updatedUser = await User.findByIdAndUpdate(userId, { fullName, bio }, { new: true });
+        } else {
+            if (!req.uploadsEnabled && req.file?.path) {
+                try {
+                    await fs.unlinkSync(req.file.path);
+                } catch (e) {
+                    // Ignore errors during file deletion
+                }
+                return res.status(403).json({ success: false, message: "Image uploads are disabled by AVC" });
+            }
+            // File uploaded via multer (diskStorage), upload to cloudinary
+            const uploadResponse = await uploadOnCloudinary(req.file.path);
+            if (!uploadResponse) {
+                return res.status(500).json({ success: false, message: "Image upload failed" });
+            }
+
+            updatedUser = await User.findByIdAndUpdate(
+                userId,
+                { fullName, bio, profilePic: uploadResponse.secure_url },
+                { new: true } //new : return the updated document
+            );
+        }
+        res.status(200).json({ success: true, message: "User profile updated successfully", updatedUser });
+    } catch (error) {
+        console.log("Update profile error:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+}
+
+export const getUserProfile = async (req, res) => {
+    res.status(200).json({ success: true, message: "User profile fetched successfully", user: req.user });
+}
